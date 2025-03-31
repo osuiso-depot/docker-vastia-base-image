@@ -251,7 +251,4 @@ function provisioning_download() {
 
 }
 
-# Allow user to disable provisioning if they started with a script they didn't want
-if [[ ! -f /.noprovisioning ]]; then
-    provisioning_start
-fi
+provisioning_start
