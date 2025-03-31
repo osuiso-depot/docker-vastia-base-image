@@ -41,6 +41,8 @@ main() {
         echo "Applying first boot optimizations..."
         # Ensure our installed vastai package is updated
         /usr/bin/pip install -U vastai
+        # Attempt to upgrade Instance Portal to latest or specified version
+        update-portal ${PORTAL_VERSION:+-v $PORTAL_VERSION}
         # Copy /opt/workspace-internal to /workspace - Brings to top layer and will support mounting a volume
         # Ensure user 1001 has full access - Avoids permission errors if running with the normal user
         workspace=${WORKSPACE:-/workspace}
@@ -59,7 +61,7 @@ main() {
         /opt/instance-tools/bin/venv-backup.sh
         # Populate /etc/environment - Skip HOME directory and ensure values are enclosed in single quotes
         env | grep -v "^HOME=" | awk -F= '{ value = substr($0, index($0, "=") + 1); printf "%s='\''%s'\''\n", $1, value }' > /etc/environment
-        # Ensure users are dropped into the venv on login.  Must be after /.launch has updated PS1 
+        # Ensure users are dropped into the venv on login.  Must be after /.launch has updated PS1
         echo 'cd ${WORKSPACE} && if [ -f "${WORKSPACE}/venv/${ACTIVE_VENV:-main}/bin/activate" ]; then source "${WORKSPACE}/venv/${ACTIVE_VENV:-main}/bin/activate"; else source /venv/${ACTIVE_VENV:-main}/bin/activate; fi' | tee -a /root/.bashrc /home/user/.bashrc
         # Warn CLI users if the container provisioning is not yet complete. Red >>>
         echo '[[ -f /.provisioning ]] && echo -e "\e[91m>>>\e[0m Instance provisioning is not yet complete.\n\e[91m>>>\e[0m Required software may not be ready.\n\e[91m>>>\e[0m See /var/log/portal/provisioning.log or the Instance Portal web app for progress updates\n\n"' | tee -a /root/.bashrc /home/user/.bashrc

@@ -15,15 +15,15 @@ def load_config():
     if os.path.exists(yaml_path):
         with open(yaml_path, 'r') as file:
             return yaml.safe_load(file)['applications']
-    
+
     apps_string = os.environ.get('PORTAL_CONFIG', '')
     if not apps_string:
         raise ValueError("No configuration found in YAML or environment variable")
-    
+
     apps = {}
     for app_string in apps_string.split('|'):
         hostname, ext_port, int_port, path, name = app_string.split(':', 4)
-        
+
         apps[name] = {
             'hostname': hostname,
             'external_port': int(ext_port),
@@ -31,12 +31,12 @@ def load_config():
             'open_path': str(path),
             'name': name
         }
-    
+
     # Save to file so user can edit before restarting container to pick up changes
     yaml_data = {"applications": apps}
     with open(yaml_path, "w") as file:
         yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
-    
+
     return apps
 
 def validate_cert_and_key():
@@ -65,18 +65,18 @@ def wait_for_valid_certs():
 def is_port_auth_excluded(external_port):
     # Get the environment variable, default to empty string if not set
     auth_exclude = os.getenv('AUTH_EXCLUDE', '')
-    
+
     # Convert the comma-separated string to a list of integers
     excluded_ports = [int(port.strip()) for port in auth_exclude.split(',') if port.strip()]
-    
+
     # Check if the external port is not in the excluded list
     return external_port in excluded_ports
 
 def generate_caddyfile(config):
-    if os.environ.get('ENABLE_HTTPS', 'true').lower() != 'false' and wait_for_valid_certs():
-        enable_https = True
-    else:
+    if os.environ.get('ENABLE_HTTPS', 'false').lower() != 'true' and wait_for_valid_certs():
         enable_https = False
+    else:
+        enable_https = True
 
     enable_auth = True if os.environ.get('ENABLE_AUTH', 'true').lower() != 'false' else False
     web_username = os.environ.get('WEB_USERNAME', 'vastai')
@@ -97,8 +97,22 @@ def generate_caddyfile(config):
     caddyfile += '            path /site.webmanifest\n'
     caddyfile += '            path /.well-known/security.txt\n'
     caddyfile += '            path /security.txt\n'
+    caddyfile += '            path /health.ico\n'
     caddyfile += '        }\n'
     caddyfile += '    }\n\n'
+
+    # Add a simple icon we can load in javascript to ensure tunnel DNS resolution
+    caddyfile += '    (healthicon) {\n'
+    caddyfile += '            route /health.ico {\n'
+    caddyfile += '                header Content-Type image/x-icon\n'
+    caddyfile += '                header Access-Control-Allow-Origin *\n'
+    caddyfile += '                header Access-Control-Allow-Methods GET, OPTIONS\n'
+    caddyfile += '                header Access-Control-Allow-Headers *\n'
+    caddyfile += '                respond 200 {\n'
+    caddyfile += '                    body "GIF89a\\x01\\x00\\x01\\x00\\x80\\x00\\x00\\xff\\xff\\xff\\x00\\x00\\x00!\\xf9\\x04\\x01\\x00\\x00\\x00\\x00,\\x00\\x00\\x00\\x00\\x01\\x00\\x01\\x00\\x00\\x02\\x02D\\x01\\x00;"\n'
+    caddyfile += '                }\n'
+    caddyfile += '            }\n'
+    caddyfile += '        }\n\n'
 
     for app_name, app_config in config.items():
         external_port = app_config['external_port']
@@ -112,7 +126,7 @@ def generate_caddyfile(config):
         caddyfile += f":{external_port} {{\n"
         if enable_https:
             caddyfile += f'    tls {CERT_PATH} {KEY_PATH}\n'
-        
+
         caddyfile += '    root * /opt/portal-aio/caddy_manager/public\n\n'
         caddyfile += '    handle_errors 502 {\n'
         caddyfile += '        rewrite * /502.html\n'
@@ -123,7 +137,7 @@ def generate_caddyfile(config):
             caddyfile += generate_auth_config(caddy_identifier, web_username, web_password, hostname, internal_port)
         else:
             caddyfile += generate_noauth_config(hostname, internal_port)
-                                                               
+
         caddyfile += "}\n\n"
 
     return caddyfile, web_username, web_password
@@ -151,8 +165,8 @@ def generate_noauth_config(hostname, internal_port):
 
 def generate_auth_config(caddy_identifier, username, password, hostname, internal_port):
     hashed_password = subprocess.check_output([CADDY_BIN, 'hash-password', '-p', password]).decode().strip()
-   
-    auth_config = f'''    
+
+    auth_config = f'''
     import noauth
 
     @token_auth {{
@@ -160,8 +174,9 @@ def generate_auth_config(caddy_identifier, username, password, hostname, interna
     }}
 
     handle @noauth {{
+        import healthicon
         reverse_proxy {hostname}:{internal_port} {{
-            {get_reverse_proxy_block(hostname, internal_port)}        
+            {get_reverse_proxy_block(hostname, internal_port)}
         }}
     }}
 
@@ -181,7 +196,7 @@ def generate_auth_config(caddy_identifier, username, password, hostname, interna
 
     route @has_valid_auth_cookie {{
         reverse_proxy {hostname}:{internal_port} {{
-            {get_reverse_proxy_block(hostname, internal_port)}        
+            {get_reverse_proxy_block(hostname, internal_port)}
         }}
     }}
 
@@ -207,12 +222,12 @@ def main():
     try:
         config = load_config()
         caddyfile_content, username, password = generate_caddyfile(config)
-        
+
         with open('/etc/Caddyfile', 'w') as f:
             f.write(caddyfile_content)
-        
+
         subprocess.run([CADDY_BIN, 'fmt', '--overwrite', CADDY_CONFIG])
-        
+
         print("*****")
         print("*")
         print("*")
@@ -223,7 +238,7 @@ def main():
         print("*")
         print("*")
         print("*****")
-  
+
     except Exception as e:
         print(f"Error: {e}")
 

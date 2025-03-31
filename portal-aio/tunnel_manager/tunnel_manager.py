@@ -3,6 +3,7 @@ import re
 import requests
 import asyncio
 import json
+import yaml
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 from fastapi import FastAPI, HTTPException
@@ -19,6 +20,29 @@ CLOUDFLARED_BIN = "/opt/portal-aio/tunnel_manager/cloudflared"
 CF_TUNNEL_TOKEN = os.environ.get('CF_TUNNEL_TOKEN')
 cloudflared_account_process: Optional[asyncio.subprocess.Process] = None
 
+def get_scheme():
+    if os.environ.get("ENABLE_HTTPS", "false").lower() != "true":
+        scheme = "http"
+    else:
+        scheme = "https"
+    return scheme
+
+def load_config():
+    yaml_path = '/etc/portal.yaml'
+    if os.path.exists(yaml_path):
+        with open(yaml_path, 'r') as file:
+            config_applications = yaml.safe_load(file)['applications']
+            return hydrate_applications(config_applications)
+
+def hydrate_applications(applications):
+    for app_name, app in applications.items():
+        if app["external_port"] == app["internal_port"] and app["internal_port"] == 8080:
+            scheme = "https"
+        else:
+            scheme = get_scheme()
+        applications[app_name]["target_url"] = f'{scheme}://{app["hostname"]}:{app["external_port"]}'
+    return applications
+
 # Function to fetch the public IP address
 def get_public_ip():
     # We should have this from the first request after clicking the Open button - Use the less reliable $PUBLIC_IPADDR otherwise
@@ -32,11 +56,11 @@ def set_external_ip(ip: str):
     try:
         # Try to create an IPv4 address object, which will raise a ValueError if invalid
         ip_obj = ipaddress.IPv4Address(ip)
-        
+
         # If valid, set the global ip_address
         global public_ipaddr
         public_ipaddr = str(ip_obj)
-        
+
         # Return status 200 if successful
         return {"status": "success", "ip": public_ipaddr}
 
@@ -50,9 +74,9 @@ def get_port_mapping(port: int):
     # Fetch the public IP
     public_ip = get_public_ip()
 
-    if not os.environ.get("ENABLE_HTTPS", "true").lower() == "false":
+    if os.environ.get("ENABLE_HTTPS", "false").lower() == "true" or port == 8080:
         scheme = "https://"
-    else: 
+    else:
         scheme = "http://"
 
     # Fetch the environment variable dynamically
@@ -79,7 +103,7 @@ class QuickTunnel:
         """Parse and normalize target URL."""
         if not target_url.startswith(('http://', 'https://')):
             target_url = 'http://' + target_url
-        
+
         return urlparse(target_url)
 
     async def start(self, timeout: int = 30):
@@ -91,20 +115,21 @@ class QuickTunnel:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT
             )
-            
+
             # Create a task for getting the tunnel URL
             async def wait_for_tunnel_url():
                 while True:
                     if not self.process or self.process.stdout is None:
                         raise Exception("Process or stdout is None")
-                        
+
                     line = await self.process.stdout.readline()
                     if not line:
                         raise Exception("Process stopped without providing tunnel URL")
-                        
+
                     line_str = line.decode().strip()
                     print(f"[{self.target.geturl()}] {line_str}")
-                    match = re.search(r'(https://[^\s]+.trycloudflare.com)', line_str)
+                    # Avoid error response URLS on the trycloudflare domain
+                    match = re.search(r'(https://\w+(-\w+){1,}\.trycloudflare\.com)', line_str)
                     if match:
                         self.tunnel_url = match.group(1)
                         return self.tunnel_url
@@ -118,9 +143,9 @@ class QuickTunnel:
 
             if not self.tunnel_url:
                 raise Exception("Failed to start tunnel")
-            
+
             self._print_task = asyncio.create_task(self._print_output())
-            
+
         except Exception as e:
             await self.stop()
             raise Exception(f"Failed to start tunnel: {str(e)}")
@@ -131,11 +156,11 @@ class QuickTunnel:
             try:
                 if not self.process or self.process.stdout is None:
                     break
-                    
+
                 line = await self.process.stdout.readline()
                 if not line:
                     break
-                    
+
                 print(f"[{self.target.geturl()}] {line.decode().strip()}")
             except asyncio.CancelledError:
                 break
@@ -151,7 +176,7 @@ class QuickTunnel:
                 await self._print_task
             except asyncio.CancelledError:
                 pass
-                
+
         if self.process:
             try:
                 self.process.terminate()
@@ -190,13 +215,13 @@ class CloudflareDaemon:
         try:
             async def start_process():
                 self.process = await asyncio.create_subprocess_exec(
-                    CLOUDFLARED_BIN, 'tunnel', '--metrics', self.metrics, 
+                    CLOUDFLARED_BIN, 'tunnel', '--metrics', self.metrics,
                     'run', '--token', self.token,
                     env = os.environ.copy(),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT
                 )
-                
+
                 # Wait for first line of output to confirm startup
                 if self.process.stdout:
                     first_line = await self.process.stdout.readline()
@@ -212,7 +237,7 @@ class CloudflareDaemon:
                 raise TimeoutError(f"Daemon didn't start within {timeout} seconds")
 
             self._print_task = asyncio.create_task(self._print_output())
-            
+
         except Exception as e:
             await self.stop()
             raise Exception(f"Failed to start cloudflared daemon: {str(e)}")
@@ -266,7 +291,7 @@ async def create_quick_tunnel(target_url: str) -> QuickTunnel:
 async def get_or_create_quick_tunnel(target_url: str) -> QuickTunnel:
     if target_url in quick_tunnels:
         return quick_tunnels[target_url]
-    
+
     tunnel = await create_quick_tunnel(target_url)
     quick_tunnels[target_url] = tunnel
     return tunnel
@@ -279,31 +304,31 @@ async def get_existing_quick_tunnel(target_url: str) -> QuickTunnel:
 
 async def get_named_tunnel_url(port: int) -> str:
     config_url = f"http://{cloudflare_metrics}/config"
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(config_url, timeout=10) as response:
                 if response.status != 200:
                     raise HTTPException(status_code=404, detail="Tunnel config not found")
-                
+
                 content = await response.text()
-                
+
                 try:
                     metrics = json.loads(content)
                 except json.JSONDecodeError as e:
                     raise Exception("Failed to parse config as JSON")
 
         ingress = metrics.get('config', {}).get('ingress', [])
-        
+
         for entry in ingress:
             service = entry.get('service', '')
             if isinstance(service, str) and service.startswith("http") and service.endswith(f":{port}"):
                 hostname = entry.get('hostname')
                 if hostname:
                     return f"https://{hostname}"
-                
+
         raise HTTPException(status_code=404, detail="Named tunnel not found")
-    
+
     except HTTPException as e:
         # Re-raise the HTTPException without modifying it
         raise e
@@ -317,19 +342,19 @@ async def get_named_tunnel_url(port: int) -> str:
 @app.get("/get-named-tunnels")
 async def get_named_tunnels():
     config_url = f"http://{cloudflare_metrics}/config"
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(config_url, timeout=10) as response:
                 if response.status != 200:
                     raise HTTPException(status_code=404, detail="Tunnel config not found")
-                
+
                 content = await response.text()
                 metrics = json.loads(content)
 
         ingress = metrics.get('config', {}).get('ingress', [])
         named_tunnels = []
-        
+
         for entry in ingress:
             service = entry.get('service', '')
             hostname = entry.get('hostname')
@@ -338,7 +363,7 @@ async def get_named_tunnels():
                     "targetUrl": service,
                     "tunnelUrl": f"https://{hostname}"
                 })
-                
+
         return named_tunnels
 
     except HTTPException as e:
@@ -370,7 +395,7 @@ async def get_quick_tunnel_if_exists(target_url: str):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.get("/get-all-quick-tunnels")
 async def get_all_quick_tunnels():
     active_tunnels = []
@@ -386,7 +411,7 @@ async def get_all_quick_tunnels():
 async def stop_quick_tunnel(target_url: str):
     if target_url not in quick_tunnels:
         raise HTTPException(status_code=404, detail="Quick tunnel not found")
-    
+
     tunnel = quick_tunnels[target_url]
     await tunnel.stop()
 
@@ -407,7 +432,7 @@ async def get_named_tunnel(port: int):
     try:
         tunnel_url = await get_named_tunnel_url(port)
         return {"tunnel_url": tunnel_url}
-    
+
     except HTTPException as e:
         # Re-raise the HTTPException without modifying it
         raise e
@@ -429,17 +454,38 @@ async def startup_event():
                 print("Named tunnel process started")
             except Exception as e:
                 print(f"Failed to start named tunnel process: {str(e)}")
-        
+
         try:
-            if os.environ.get("ENABLE_HTTPS","").lower() ==  "false":
-                default_tunnel = await get_or_create_quick_tunnel("http://localhost:1111")
-            else:
-                default_tunnel = await get_or_create_quick_tunnel("https://localhost:1111")
-            if default_tunnel:
-                print(f"Default Tunnel started for port 1111 - {default_tunnel.tunnel_url}?token={os.environ.get('OPEN_BUTTON_TOKEN')}")
-        except Exception as e:
-            print(f"Failed to create default tunnel: {str(e)}")
-            # Sometimes Cloudflare Tunnels don't work (No SLA) - This must never bee fatal
+            # Track unique ports and their first app name
+            config = load_config()
+            unique_targets = {}
+            for app_name, app_config in config.items():
+                target = app_config['target_url']
+                if target not in unique_targets:
+                    unique_targets[target] = app_name
+
+            # Create tunnels only for unique ports
+            tunnel_tasks = []
+            for target in unique_targets.keys():
+                try:
+                    task = get_or_create_quick_tunnel(f"{target}")
+                    tunnel_tasks.append(task)
+                except Exception as e:
+                    print(f"Failed to create tunnel task for {target}: {e}")
+
+            if tunnel_tasks:
+                default_tunnels = await asyncio.gather(*tunnel_tasks)
+
+            # Print results
+            for port, result in zip(unique_targets.keys(), default_tunnels):
+                app_name = unique_targets[target]
+                if isinstance(result, Exception):
+                    print(f"Failed to create default tunnel for {port}: {str(result)}")
+                elif result:
+                    print(f"Default Tunnel started for {port} - {result.tunnel_url}?token={os.environ.get('OPEN_BUTTON_TOKEN')}")
+        except:
+            # User can still create tunnels in the UI
+            pass
     except Exception as e:
         print(f"Startup failed: {str(e)}")
         raise

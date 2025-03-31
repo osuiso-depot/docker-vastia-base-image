@@ -40,7 +40,7 @@ Find out how to interact with the API in the [Programmatic Access](#programmatic
 You can interact with the running API server from the instance CLI. To do so, enter:
 
 ```bash
-vllm chat http://localhost:18000/v1
+vllm chat --url http://localhost:18000/v1
 ```
 
 
@@ -190,7 +190,7 @@ Need to modify the configuration in a running instance? Edit `/etc/portal.yaml` 
 
 ## Additional Software
 
-Jupyter is always started when run with the Jupyter launch mode.  All other software is managed by supervisord. 
+Jupyter is always started when run with the Jupyter launch mode.  All other software is managed by supervisord.
 
 Manage application startup by modifying the `PORTAL_CONFIG` environment variable before instance start, or by editing the file `/etc/portal.yaml` in a running instance.
 
