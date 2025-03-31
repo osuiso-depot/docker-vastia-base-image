@@ -9,5 +9,10 @@ docker buildx build \
     --platform linux/amd64 \
     --build-arg PYTORCH_BASE=vastai/pytorch:2.5.1-cuda-12.1.1 \
     --build-arg FORGE_REF=f533078 \
-    . -t repo/image:tag --push
+    . -t unlikable6/forge_2503:lastest --push
+```
+
+## Windows
+```bash
+docker buildx build --platform linux/amd64 --build-arg PYTORCH_BASE=vastai/pytorch:2.5.1-cuda-12.1.1 --build-arg FORGE_REF=f533078 . -t unlikable6/forge_2503:lastest --push
 ```
