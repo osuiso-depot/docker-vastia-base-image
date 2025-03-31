@@ -64,8 +64,8 @@ function base_config(){
     wget -q "https://huggingface.co/rimOPS/embeddings/resolve/main/EasyNegative.pt"
 
     cd "${WORKSPACE}/stable-diffusion-webui/"
-    wget -q "https://raw.githubusercontent.com/osuiso-depot/docker-vastai-base-image/stable-diffusion-webui-forge/refs/heads/main/config/provisioning/config.json"
-    wget -q "https://raw.githubusercontent.com/osuiso-depot/docker-stable-diffusion-webui-forge/refs/heads/main/config/provisioning/ui-config.json"
+    wget -q "https://raw.githubusercontent.com/osuiso-depot/docker-vastia-base-image/refs/heads/main/derivatives/pytorch/derivatives/a1111/config.json"
+    wget -q "https://raw.githubusercontent.com/osuiso-depot/docker-vastia-base-image/refs/heads/main/derivatives/pytorch/derivatives/a1111/ui-config.json"
 }
 
 function extensions_config() {
