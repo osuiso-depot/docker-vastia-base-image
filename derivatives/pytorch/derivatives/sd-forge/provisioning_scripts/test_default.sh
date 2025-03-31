@@ -51,7 +51,7 @@ CONTROLNET_MODELS=(
 )
 
 function base_config(){
-    cd "${WORKSPACE}/stable-diffusion-webui-forge/"
+    cd "${FORGE_DIR}/"
     wget -q "https://raw.githubusercontent.com/osuiso-depot/docker-stable-diffusion-webui-forge/refs/heads/main/config/provisioning/config.json"
     wget -q "https://raw.githubusercontent.com/osuiso-depot/docker-stable-diffusion-webui-forge/refs/heads/main/config/provisioning/ui-config.json"
 }
@@ -82,20 +82,20 @@ function extensions_config() {
     fi
 
     # wildcards フォルダを目的のディレクトリに移動
-    mv "wildcards" "${WORKSPACE}/stable-diffusion-webui-forge/extensions/sd-dynamic-prompts/"
+    mv "wildcards" "${FORGE_DIR}/extensions/sd-dynamic-prompts/"
     if [ $? -ne 0 ]; then
         echo "Failed to move wildcards directory"
     fi
 
     # Lora-block-weight プリセットを目的のディレクトリに移動
-    mv "lbwpresets.txt" "${WORKSPACE}/stable-diffusion-webui-forge/extensions/sd-webui-lora-block-weight/scripts"
+    mv "lbwpresets.txt" "${FORGE_DIR}/extensions/sd-webui-lora-block-weight/scripts"
     if [ $? -ne 0 ]; then
         echo "Failed move lbwpresets.txt"
     fi
 
     # styles.csv を目的のディレクトリに移動
-    mv "styles.csv" "${WORKSPACE}/stable-diffusion-webui-forge"
-    mv "styles_integrated.csv" "${WORKSPACE}/stable-diffusion-webui-forge"
+    mv "styles.csv" "${FORGE_DIR}"
+    mv "styles_integrated.csv" "${FORGE_DIR}"
     if [ $? -ne 0 ]; then
         echo "Failed move styles.csv"
     fi
